@@ -2,11 +2,13 @@
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading.Tasks;
+using Windows.ApplicationModel.Core;
 using Windows.Devices.Enumeration;
 using Windows.Media.Audio;
 using Windows.Media.Render;
 using Windows.Storage;
 using Windows.Storage.Pickers;
+using Windows.UI.Core;
 using Windows.UI.Xaml;
 
 namespace UWPAudioPlayground
@@ -15,12 +17,23 @@ namespace UWPAudioPlayground
     {
         public DelegateCommand PlayCommand { get; set; }
         public DelegateCommand StopCommand { get; set; }
-        private AudioGraph authGraph;
+        private AudioGraph audioGraph;
         private DeviceInformation _selectedDevice;
         private AudioFileInputNode fileInputNode;
+        private AudioDeviceOutputNode deviceOutputNode;
         private DispatcherTimer timer;
         private bool updatingPosition;
         public ObservableCollection<DeviceInformation> Devices { get; }
+
+        public string Diagnostics
+        {
+            get => diagnostics;
+            set
+            {
+                diagnostics = value;
+                OnPropertyChanged();
+            }
+        }
 
         public DeviceInformation SelectedDevice
         {
@@ -71,6 +84,7 @@ namespace UWPAudioPlayground
         }
 
         private TimeSpan position;
+        private string diagnostics;
 
         public TimeSpan Position
         {
@@ -132,27 +146,39 @@ namespace UWPAudioPlayground
 
         private async void Play()
         {
-            if (authGraph == null)
+            if (audioGraph == null)
             {
                 var settings = new AudioGraphSettings(AudioRenderCategory.Media);
                 settings.PrimaryRenderDevice = SelectedDevice;
                 var createResult = await AudioGraph.CreateAsync(settings);
                 if(createResult.Status != AudioGraphCreationStatus.Success) return;
-                authGraph = createResult.Graph;
-                var deviceResult = await authGraph.CreateDeviceOutputNodeAsync();
+                audioGraph = createResult.Graph;
+                audioGraph.UnrecoverableErrorOccurred += OnAudioGraphError;
+            }
+
+            if (deviceOutputNode == null)
+            {
+                var deviceResult = await audioGraph.CreateDeviceOutputNodeAsync();
                 if(deviceResult.Status != AudioDeviceNodeCreationStatus.Success) return;
-                var outputNode = deviceResult.DeviceOutputNode;
+                deviceOutputNode = deviceResult.DeviceOutputNode;
+            }
+
+            if (fileInputNode == null)
+            {
                 var file = await SelectPlaybackFile();
                 if(file == null) return;
-                var fileResult = await authGraph.CreateFileInputNodeAsync(file);
+                var fileResult = await audioGraph.CreateFileInputNodeAsync(file);
                 if(fileResult.Status != AudioFileNodeCreationStatus.Success) return;
                 fileInputNode = fileResult.FileInputNode;
-                fileInputNode.AddOutgoingConnection(outputNode);
+                fileInputNode.AddOutgoingConnection(deviceOutputNode);
                 Duration = fileInputNode.Duration;
                 fileInputNode.PlaybackSpeedFactor = PlaybackSpeed / 100.0;
                 fileInputNode.OutgoingGain = Volume / 100.0;
+                fileInputNode.FileCompleted += FileInputNodeOnFileCompleted;
             }
-            authGraph.Start();
+
+            
+            audioGraph.Start();
         }
 
         private async Task<IStorageFile> SelectPlaybackFile()
@@ -166,9 +192,32 @@ namespace UWPAudioPlayground
             var file = await picker.PickSingleFileAsync();
             return file;
         }
+
+        private async void FileInputNodeOnFileCompleted(AudioFileInputNode sender, object args)
+        {
+            await CoreApplication.MainView.CoreWindow.Dispatcher.RunAsync(
+                CoreDispatcherPriority.Normal,
+                () =>
+                {
+                    audioGraph.Stop();
+                    Position = TimeSpan.Zero;
+                }
+            );
+        }
+
+        private async void OnAudioGraphError(AudioGraph sender, AudioGraphUnrecoverableErrorOccurredEventArgs args)
+        {
+            await CoreApplication.MainView.CoreWindow.Dispatcher.RunAsync(
+                CoreDispatcherPriority.Normal,
+                () =>
+                {
+                    Diagnostics += $"Audio Graph Error: {args.Error}\r\n";
+                }
+            );
+        }
         private void Stop()
         {
-            authGraph?.Stop();
+            audioGraph?.Stop();
         }
 
     }
