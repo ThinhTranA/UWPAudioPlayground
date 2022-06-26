@@ -7,6 +7,7 @@ using Windows.Media.Audio;
 using Windows.Media.Render;
 using Windows.Storage;
 using Windows.Storage.Pickers;
+using Windows.UI.Xaml;
 
 namespace UWPAudioPlayground
 {
@@ -16,6 +17,9 @@ namespace UWPAudioPlayground
         public DelegateCommand StopCommand { get; set; }
         private AudioGraph authGraph;
         private DeviceInformation _selectedDevice;
+        private AudioFileInputNode fileInputNode;
+        private DispatcherTimer timer;
+        private bool updatingPosition;
         public ObservableCollection<DeviceInformation> Devices { get; }
 
         public DeviceInformation SelectedDevice
@@ -24,8 +28,76 @@ namespace UWPAudioPlayground
             set => _selectedDevice = value;
         }
 
+        private TimeSpan duration;
+
+        public TimeSpan Duration
+        {
+            get { return duration; }
+            set {
+                if (value.Equals(duration)) return;
+                duration = value;
+                OnPropertyChanged();
+            }
+        }
+
+        private double volume;
+
+        public double Volume
+        {
+            get { return volume; }
+            set 
+            {
+                if(value.Equals(volume)) return;
+                volume = value;
+                OnPropertyChanged();
+                if (fileInputNode != null)
+                    fileInputNode.OutgoingGain = value / 100.0;
+            }
+        }
+
+        private double playbackSpeed;
+
+        public double PlaybackSpeed
+        {
+            get { return playbackSpeed; }
+            set 
+            {
+                if(value.Equals(playbackSpeed)) return;
+                playbackSpeed = value; 
+                OnPropertyChanged();
+                if (fileInputNode != null)
+                    fileInputNode.PlaybackSpeedFactor = value / 100.0;
+            }
+        }
+
+        private TimeSpan position;
+
+        public TimeSpan Position
+        {
+            get { return position; }
+            set 
+            { 
+                if(position.Equals(value)) return;
+                position = value;
+                OnPropertyChanged();
+                if (!updatingPosition)
+                {
+                    fileInputNode?.Seek(position);
+                }
+            }
+        }
+
+
+
         public MainPageViewModel()
         {
+            timer = new DispatcherTimer();
+            timer.Interval = TimeSpan.FromMilliseconds(500);
+            timer.Start();
+            timer.Tick += TickOnTimer;
+            PlaybackSpeed = 50;
+            Volume = 50;
+
             PlayCommand = new DelegateCommand(Play);
             StopCommand = new DelegateCommand(Stop);
             Devices = new ObservableCollection<DeviceInformation>();
@@ -40,6 +112,21 @@ namespace UWPAudioPlayground
             }
 
             SelectedDevice = Devices.FirstOrDefault(d => d.IsDefault);
+        }
+
+        private void TickOnTimer(object sender, object o)
+        {
+            try
+            {
+                updatingPosition = true;
+                if(fileInputNode != null)
+                {
+                    Position = fileInputNode.Position;
+                }
+            } finally
+            {
+                updatingPosition = false;
+            }
         }
 
 
@@ -59,8 +146,11 @@ namespace UWPAudioPlayground
                 if(file == null) return;
                 var fileResult = await authGraph.CreateFileInputNodeAsync(file);
                 if(fileResult.Status != AudioFileNodeCreationStatus.Success) return;
-                var fileInputNode = fileResult.FileInputNode;
+                fileInputNode = fileResult.FileInputNode;
                 fileInputNode.AddOutgoingConnection(outputNode);
+                Duration = fileInputNode.Duration;
+                fileInputNode.PlaybackSpeedFactor = PlaybackSpeed / 100.0;
+                fileInputNode.OutgoingGain = Volume / 100.0;
             }
             authGraph.Start();
         }
