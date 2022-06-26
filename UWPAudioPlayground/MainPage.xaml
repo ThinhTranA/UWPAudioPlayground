@@ -25,7 +25,7 @@
             Margin="10"
             VerticalAlignment="Top"
             Orientation="Horizontal">
-            <Button
+            <Button 
                 Margin="16"
                 Command="{Binding PlayCommand}"
                 Content="Play" />

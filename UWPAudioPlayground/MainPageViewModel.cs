@@ -5,6 +5,8 @@ using System.Threading.Tasks;
 using Windows.Devices.Enumeration;
 using Windows.Media.Audio;
 using Windows.Media.Render;
+using Windows.Storage;
+using Windows.Storage.Pickers;
 
 namespace UWPAudioPlayground
 {
@@ -50,12 +52,34 @@ namespace UWPAudioPlayground
                 var createResult = await AudioGraph.CreateAsync(settings);
                 if(createResult.Status != AudioGraphCreationStatus.Success) return;
                 authGraph = createResult.Graph;
+                var deviceResult = await authGraph.CreateDeviceOutputNodeAsync();
+                if(deviceResult.Status != AudioDeviceNodeCreationStatus.Success) return;
+                var outputNode = deviceResult.DeviceOutputNode;
+                var file = await SelectPlaybackFile();
+                if(file == null) return;
+                var fileResult = await authGraph.CreateFileInputNodeAsync(file);
+                if(fileResult.Status != AudioFileNodeCreationStatus.Success) return;
+                var fileInputNode = fileResult.FileInputNode;
+                fileInputNode.AddOutgoingConnection(outputNode);
             }
             authGraph.Start();
+        }
+
+        private async Task<IStorageFile> SelectPlaybackFile()
+        {
+            var picker = new FileOpenPicker();
+            picker.ViewMode = PickerViewMode.List;
+            picker.SuggestedStartLocation = PickerLocationId.Desktop;
+            picker.FileTypeFilter.Add(".mp3");
+            picker.FileTypeFilter.Add(".aac");
+            picker.FileTypeFilter.Add(".wav");
+            var file = await picker.PickSingleFileAsync();
+            return file;
         }
         private void Stop()
         {
             authGraph?.Stop();
         }
+
     }
 }
